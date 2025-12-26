@@ -95,6 +95,9 @@ export default function Home() {
     setResult(null)
 
     try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL
+      const endpoint = apiBase ? `${apiBase}/api/generate` : '/api/generate'
+
       const formData = new FormData()
       formData.append('simple_prompt', prompt || 'User uploaded background')
       formData.append('track_cost', 'true')
@@ -115,7 +118,7 @@ export default function Home() {
         formData.append('overlay_text', overlayText)
       }
 
-      const response = await fetch('/api/generate', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       })

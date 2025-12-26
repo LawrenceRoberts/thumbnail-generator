@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { getThumbnail, putThumbnail, type ImageLayer, type TextLayer } from '../../lib/thumbDb'
@@ -17,7 +17,7 @@ type TextElement = TextLayer
 
 type ImageElement = ImageLayer
 
-export default function ThumbnailEditor() {
+function ThumbnailEditorInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const thumbnailId = searchParams.get('id')
@@ -832,5 +832,13 @@ export default function ThumbnailEditor() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function ThumbnailEditor() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading…</div>}>
+      <ThumbnailEditorInner />
+    </Suspense>
   )
 }

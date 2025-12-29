@@ -40,7 +40,12 @@ npm start
 
 ## Configuration
 
-The frontend connects to the backend API at `http://localhost:8000/api/generate`. Update the API URL in `app/page.tsx` if your backend runs on a different port.
+The frontend uses a same-origin API route (`/api/generate`) which proxies to your backend.
+
+- Local dev: set `BACKEND_URL=http://localhost:8000`
+- Deploy (Vercel): set `BACKEND_URL=https://<your-backend-host>` (e.g. your Fly app URL)
+
+Avoid pointing the browser at `localhost`/LAN IPs in production, because that will only work on the specific machine running the backend (phones will fail with “Failed to fetch”).
 
 ## Tech Stack
 

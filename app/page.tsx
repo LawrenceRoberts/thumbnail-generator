@@ -95,7 +95,10 @@ export default function Home() {
     setResult(null)
 
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL
+      // Always use same-origin API in production so the app works on any device.
+      // (Using NEXT_PUBLIC_API_URL can accidentally point to localhost/LAN and only work on one machine.)
+      const isDev = process.env.NODE_ENV === 'development'
+      const apiBase = isDev ? process.env.NEXT_PUBLIC_API_URL : undefined
       const endpoint = apiBase ? `${apiBase}/api/generate` : '/api/generate'
 
       const formData = new FormData()
@@ -147,7 +150,14 @@ export default function Home() {
       const data = await response.json()
       setResult(data)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      const message = err instanceof Error ? err.message : 'An error occurred'
+      if (message === 'Failed to fetch') {
+        setError(
+          'Failed to fetch. This usually means the app is calling a backend URL that your device cannot reach. In production, set Vercel env BACKEND_URL to your public backend (e.g. https://<your-fly-app>.fly.dev) and redeploy.'
+        )
+      } else {
+        setError(message)
+      }
     } finally {
       setLoading(false)
     }

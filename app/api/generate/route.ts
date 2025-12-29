@@ -1,7 +1,7 @@
 export const runtime = 'nodejs'
 // Vercel can terminate long-running Serverless Functions; thumbnail generation can take a while.
 // Increase the allowed duration to reduce proxy timeouts.
-export const maxDuration = 60
+export const maxDuration = 180
 
 const rawBackendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const BACKEND_URL = rawBackendUrl.replace(/^"|"$/g, '').replace(/\/$/, '')

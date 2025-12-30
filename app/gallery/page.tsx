@@ -11,6 +11,8 @@ type Thumbnail = {
   overlayText: string
   createdAt: string
   cost: { usd: number; zar: number } | null
+  width?: number
+  height?: number
 }
 
 export default function Gallery() {
@@ -36,6 +38,8 @@ export default function Gallery() {
         overlayText: record.overlayText,
         createdAt: record.createdAt,
         cost: record.cost ? { usd: record.cost.usd, zar: record.cost.zar } : null,
+        width: record.width,
+        height: record.height,
       })
     }
     setThumbnails(mapped)
@@ -135,7 +139,12 @@ export default function Gallery() {
                     <img
                       src={thumbnail.imageUrl}
                       alt={thumbnail.prompt}
-                      className="w-full aspect-video object-cover"
+                      className="w-full object-cover"
+                      style={
+                        thumbnail.width && thumbnail.height
+                          ? { aspectRatio: `${thumbnail.width} / ${thumbnail.height}` }
+                          : undefined
+                      }
                     />
                     <div className="p-4">
                       <p className="text-sm text-gray-400 truncate">

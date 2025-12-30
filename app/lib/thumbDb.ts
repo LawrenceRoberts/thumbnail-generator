@@ -40,6 +40,8 @@ export type ThumbnailRecord = {
   prompt: string
   overlayText: string
   cost: ThumbnailCost
+  width?: number
+  height?: number
   finalPng: Blob
   basePng: Blob // composite_before_text (background + person, no text)
   layers?: {

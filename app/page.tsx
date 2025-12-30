@@ -48,6 +48,9 @@ export default function Home() {
   const [backgroundImage, setBackgroundImage] = useState<File | null>(null)
   const [backgroundPreview, setBackgroundPreview] = useState<string | null>(null)
   const [overlayText, setOverlayText] = useState('')
+  const [aspect, setAspect] = useState<'16:9' | '9:16'>('16:9')
+
+  const targetSize = aspect === '16:9' ? { width: 1280, height: 720 } : { width: 720, height: 1280 }
 
   const revokeIfObjectUrl = (url: string | null) => {
     if (url && url.startsWith('blob:')) {
@@ -104,6 +107,8 @@ export default function Home() {
       const formData = new FormData()
       formData.append('simple_prompt', prompt || 'User uploaded background')
       formData.append('track_cost', 'true')
+      formData.append('width', String(targetSize.width))
+      formData.append('height', String(targetSize.height))
       
       if (peopleImages.length > 0) {
         for (const f of peopleImages) {
@@ -181,9 +186,9 @@ export default function Home() {
   }
 
   const buildPersonImageLayers = async (cutouts: string[]): Promise<ImageLayer[]> => {
-    // Canvas is 1280x720 in the editor.
-    const CANVAS_WIDTH = 1280
-    const CANVAS_HEIGHT = 720
+    // Match the generated image size so saved layers line up in the editor.
+    const CANVAS_WIDTH = result?.metadata?.width ?? targetSize.width
+    const CANVAS_HEIGHT = result?.metadata?.height ?? targetSize.height
 
     const sources = cutouts.map((b64) => `data:image/png;base64,${b64}`)
     const dims = await Promise.all(sources.map((src) => loadImageDimensions(src)))
@@ -264,6 +269,8 @@ export default function Home() {
         prompt: result.metadata.original_prompt,
         overlayText: overlayText,
         cost: result.cost_tracking,
+        width: result.metadata.width,
+        height: result.metadata.height,
         finalPng,
         basePng,
         layers: {
@@ -272,7 +279,7 @@ export default function Home() {
                 {
                   id: 'text-1',
                   text: textContent,
-                  x: 640,
+                  x: Math.round((result.metadata.width ?? targetSize.width) / 2),
                   y: 40,
                   fontSize: 80,
                   fontFamily: 'Impact',
@@ -403,6 +410,20 @@ export default function Home() {
           <label className="block text-lg font-semibold mb-4">
             {backgroundImage ? 'Additional Instructions (Optional)' : 'Describe Your Thumbnail Background'}
           </label>
+
+          {/* Aspect Ratio */}
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-gray-300 mb-2">Aspect Ratio</label>
+            <select
+              value={aspect}
+              onChange={(e) => setAspect(e.target.value as '16:9' | '9:16')}
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-red-500 transition-all"
+            >
+              <option value="16:9">16:9 (1280×720)</option>
+              <option value="9:16">9:16 (720×1280)</option>
+            </select>
+          </div>
+
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}

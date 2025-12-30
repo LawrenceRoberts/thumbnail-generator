@@ -46,9 +46,10 @@ function ThumbnailEditorInner() {
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const [imageCacheVersion, setImageCacheVersion] = useState(0)
 
-  // Canvas dimensions (YouTube thumbnail size)
-  const CANVAS_WIDTH = 1280
-  const CANVAS_HEIGHT = 720
+  // Canvas dimensions (default YouTube thumbnail size, but supports 9:16 too)
+  const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 })
+  const CANVAS_WIDTH = canvasSize.width
+  const CANVAS_HEIGHT = canvasSize.height
 
   const buildFont = (element: TextElement) => {
     let font = ''
@@ -168,6 +169,10 @@ function ThumbnailEditorInner() {
         cost: record.cost,
       })
 
+      if (typeof record.width === 'number' && typeof record.height === 'number' && record.width > 0 && record.height > 0) {
+        setCanvasSize({ width: record.width, height: record.height })
+      }
+
       // Load the base image that has NO baked text.
       const baseUrl = URL.createObjectURL(record.basePng)
       loadBackgroundImage(baseUrl)
@@ -182,6 +187,10 @@ function ThumbnailEditorInner() {
     const img = new Image()
     img.onload = () => {
       setBackgroundImage(img)
+      // Prefer the actual bitmap size; this keeps the editor aligned with the generated image.
+      if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setCanvasSize({ width: img.naturalWidth, height: img.naturalHeight })
+      }
     }
     img.src = dataUrl
   }

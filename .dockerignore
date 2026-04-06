@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv/
+venv/
+
+thumbnail-frontend/node_modules/
+thumbnail-frontend/.next/
+thumbnail-frontend/out/
+
+.git/
+.gitignore
+
+*.log

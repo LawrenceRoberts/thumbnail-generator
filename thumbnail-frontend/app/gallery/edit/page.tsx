@@ -86,9 +86,7 @@ function ThumbnailEditorInner() {
       const metrics = ctx.measureText(line)
       maxLineWidth = Math.max(maxLineWidth, metrics.width)
       // Prefer precise bounds when available
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ascent = (metrics as any).actualBoundingBoxAscent
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const descent = (metrics as any).actualBoundingBoxDescent
       if (typeof ascent === 'number') maxAscent = Math.max(maxAscent, ascent)
       if (typeof descent === 'number') maxDescent = Math.max(maxDescent, descent)

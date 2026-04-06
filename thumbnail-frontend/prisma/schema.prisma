@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  videos    Video[]
+}
+
+model Video {
+  id        String   @id @default(cuid())
+  /// YouTube video id (11 chars), e.g. dQw4w9WgXcQ
+  ytVideoId String   @unique
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  iterations ThumbnailIteration[]
+
+  @@index([userId])
+}
+
+model ThumbnailIteration {
+  id               String   @id @default(cuid())
+
+  videoId          String
+  video            Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  /// 0-100
+  performanceScore Float
+  /// AI suggestions used to create this iteration (store as JSON array or object)
+  aiSuggestions    Json
+  /// S3 (or compatible) URL of the generated image
+  imageS3Url       String
+
+  createdAt        DateTime @default(now())
+
+  @@index([videoId, createdAt])
+}

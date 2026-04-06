@@ -1,8 +1,12 @@
+
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { base64PngToBlob, putThumbnail, type ImageLayer } from './lib/thumbDb'
+import { saveThumbnailIterationFromAnalysis } from './actions/saveThumbnailIteration'
+import { fetchLatestThumbnailIterations, type ThumbnailIterationRow } from './actions/fetchThumbnailIterations'
+import { ThumbnailComparison, type YouTubeStats } from './components/ThumbnailComparison'
 
 interface CostTracking {
   usd: number
@@ -50,7 +54,202 @@ export default function Home() {
   const [overlayText, setOverlayText] = useState('')
   const [aspect, setAspect] = useState<'16:9' | '9:16'>('16:9')
 
+  const [videoUrl, setVideoUrl] = useState('')
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [geminiAudit, setGeminiAudit] = useState<{ score: number; audit: string[]; fluxPrompt?: string } | null>(null)
+  const [geminiError, setGeminiError] = useState<string | null>(null)
+  const [pendingFluxPrompt, setPendingFluxPrompt] = useState<string | null>(null)
+  const [analyzedThumbnailUrl, setAnalyzedThumbnailUrl] = useState<string | null>(null)
+  const [analyzedVideoId, setAnalyzedVideoId] = useState<string | null>(null)
+  const [analyzedStats, setAnalyzedStats] = useState<YouTubeStats | null>(null)
+  const [isGeneratingSuggested, setIsGeneratingSuggested] = useState(false)
+  const [suggestedError, setSuggestedError] = useState<string | null>(null)
+  const [suggestedOptimizedUrl, setSuggestedOptimizedUrl] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const [galleryIterations, setGalleryIterations] = useState<ThumbnailIterationRow[]>([])
+
   const targetSize = aspect === '16:9' ? { width: 1280, height: 720 } : { width: 720, height: 1280 }
+
+  const showToast = (message: string) => {
+    setToast(message)
+    window.setTimeout(() => setToast(null), 3500)
+  }
+
+  const refreshGallery = async () => {
+    const rows = await fetchLatestThumbnailIterations(12)
+    setGalleryIterations(rows)
+  }
+
+  useEffect(() => {
+    console.log('[Home] mounted')
+    return () => {
+      console.log('[Home] unmounted')
+    }
+  }, [])
+
+  useEffect(() => {
+    console.log('[state] pendingFluxPrompt changed:', pendingFluxPrompt)
+  }, [pendingFluxPrompt])
+
+  useEffect(() => {
+    void refreshGallery()
+  }, [])
+
+  const handleAudit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!videoUrl.trim()) return
+
+    setIsAnalyzing(true)
+    setAnalysisError(null)
+    setPendingFluxPrompt(null)
+    setGeminiError(null)
+
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl: videoUrl.trim() }),
+      })
+
+      if (!response.ok) {
+        let message = 'Failed to analyze video'
+        try {
+          const errorData = await response.json()
+          const detail = (errorData as any)?.detail ?? (errorData as any)?.error ?? errorData
+          message = typeof detail === 'string' ? detail : JSON.stringify(detail)
+        } catch {
+          // ignore
+        }
+        throw new Error(message)
+      }
+
+      const data = (await response.json()) as any
+
+      console.log('Gemini Response:', data)
+
+      setGeminiError(
+        typeof data?.gemini_error === 'string'
+          ? data.gemini_error
+          : typeof data?.geminiError === 'string'
+            ? data.geminiError
+            : null
+      )
+
+      // Keep these around so the Gallery panel can show the analyzed thumbnail immediately.
+      setAnalyzedThumbnailUrl(typeof data?.thumbnailUrl === 'string' ? data.thumbnailUrl : null)
+      setAnalyzedVideoId(typeof data?.videoId === 'string' ? data.videoId : null)
+      setAnalyzedStats({
+        views: typeof data?.views === 'number' ? data.views : null,
+        likes: typeof data?.likes === 'number' ? data.likes : null,
+        comments: typeof data?.commentCount === 'number' ? data.commentCount : typeof data?.comment_count === 'number' ? data.comment_count : null,
+      })
+      // Clear any previous optimized preview when a new analysis runs.
+      setSuggestedOptimizedUrl(null)
+      setSuggestedError(null)
+
+      // Defensive extraction: different backend/proxy shapes.
+      // Only set once; do not overwrite later with null/empty.
+      const prompt =
+        data?.flux_prompt ||
+        data?.optimization_prompt ||
+        data?.analysis?.flux_prompt ||
+        data?.prompt_for_fix ||
+        data?.promptForFix
+
+      const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : ''
+      if (normalizedPrompt) {
+        // Ensure this is set before any other long async work (DB writes, refresh, etc.)
+        setPendingFluxPrompt(normalizedPrompt)
+      }
+
+      const scoreRaw = data?.score ?? data?.performanceScore ?? data?.performance_score ?? data?.['Performance Score']
+      const score = typeof scoreRaw === 'number' ? scoreRaw : Number(scoreRaw)
+
+      const auditRaw = data?.audit ?? data?.improvementSuggestions ?? data?.suggestions ?? data?.['Suggestions']
+      const audit = Array.isArray(auditRaw)
+        ? auditRaw.map((s) => String(s)).filter(Boolean).slice(0, 3)
+        : typeof auditRaw === 'string'
+          ? auditRaw
+              .split('\n')
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .slice(0, 3)
+          : []
+
+      const fluxPrompt = normalizedPrompt || undefined
+
+      // 1) Show Gemini audit results locally
+      setGeminiAudit({ score: Number.isFinite(score) ? score : 0, audit, fluxPrompt })
+
+      // 2) Persist to Supabase
+      await saveThumbnailIterationFromAnalysis({
+        videoId: String(data?.videoId ?? data?.video_id ?? ''),
+        thumbnailUrl: typeof data?.thumbnailUrl === 'string' ? data.thumbnailUrl : undefined,
+        performanceScore: Number.isFinite(score) ? score : 0,
+        improvementSuggestions: audit,
+      })
+
+      // 3) Immediately refresh Gallery from Supabase
+      await refreshGallery()
+
+      if (Number.isFinite(score) && score > 80) {
+        showToast('Performance Score above 80 — great thumbnail!')
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Analyze failed'
+      setAnalysisError(message)
+      setGeminiError(null)
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  const generateSuggestedChanges = async () => {
+    if (!pendingFluxPrompt) {
+      showToast('Please run the audit first to generate optimization logic')
+      return
+    }
+    if (!analyzedThumbnailUrl) {
+      setSuggestedError('Missing thumbnail URL from analysis.')
+      return
+    }
+
+    setIsGeneratingSuggested(true)
+    setSuggestedError(null)
+
+    try {
+      const res = await fetch('/api/generate-optimized-background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flux_prompt: pendingFluxPrompt,
+          style_reference_url: analyzedThumbnailUrl,
+        }),
+      })
+
+      const contentType = res.headers.get('content-type') || ''
+      const body = contentType.includes('application/json') ? await res.json() : await res.text()
+
+      if (!res.ok) {
+        const detail = (body as any)?.detail ?? body
+        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+      }
+
+      const imageUrl = (body as any)?.imageUrl
+      if (typeof imageUrl !== 'string' || !imageUrl) {
+        throw new Error('Backend did not return imageUrl')
+      }
+
+      setSuggestedOptimizedUrl(imageUrl)
+      showToast('Generated suggested improvements')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to generate suggested changes'
+      setSuggestedError(message)
+    } finally {
+      setIsGeneratingSuggested(false)
+    }
+  }
 
   const revokeIfObjectUrl = (url: string | null) => {
     if (url && url.startsWith('blob:')) {
@@ -313,12 +512,148 @@ export default function Home() {
   return (
     <main className="min-h-screen p-8 bg-gradient-to-b from-gray-900 to-gray-800 text-white">
       <div className="max-w-6xl mx-auto">
+        {toast ? (
+          <div className="fixed top-4 right-4 z-50 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-200 shadow-2xl">
+            {toast}
+          </div>
+        ) : null}
+
         <h1 className="text-5xl font-bold text-center mb-2 bg-gradient-to-r from-red-500 to-pink-500 bg-clip-text text-transparent">
           YouTube Thumbnail Generator
         </h1>
         <p className="text-center text-gray-400 mb-12">
           AI-powered thumbnails optimized for maximum CTR
         </p>
+
+        {/* Analyze + Gallery */}
+        <div className="grid lg:grid-cols-2 gap-6 mb-8">
+          <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl">
+            <h2 className="text-xl font-bold mb-3">Analyze a YouTube Video</h2>
+            <form onSubmit={handleAudit} className="space-y-3">
+              <input
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="Paste a YouTube URL"
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-red-500 transition-all"
+              />
+              <button
+                type="submit"
+                disabled={isAnalyzing || !videoUrl.trim()}
+                className="w-full bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-lg transition-all"
+              >
+                {isAnalyzing ? 'Analyzing…' : 'Analyze'}
+              </button>
+              {analysisError ? <p className="text-sm text-red-300">{analysisError}</p> : null}
+            </form>
+
+            {geminiAudit ? (
+              <div className="mt-5 rounded-xl border border-gray-700 bg-gray-900/40 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold">
+                    {geminiError ? 'Heuristic Audit (Gemini unavailable)' : 'Gemini Audit'}
+                  </p>
+                  <p className="text-sm text-gray-200">Score: {Math.round(geminiAudit.score)}/100</p>
+                </div>
+                {geminiError ? (
+                  <p className="mt-2 text-xs text-red-300 break-words">Gemini error: {geminiError}</p>
+                ) : null}
+                <ul className="mt-3 space-y-2 text-sm text-gray-200">
+                  {geminiAudit.audit.length > 0 ? (
+                    geminiAudit.audit.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-gray-200">
+                        <span className="mt-[2px] shrink-0 text-gray-400">•</span>
+                        <span
+                          className={
+                            idx < 2
+                              ? 'shrink-0 font-semibold text-green-300'
+                              : 'shrink-0 font-semibold text-red-300'
+                          }
+                        >
+                          {idx < 2 ? 'Strength' : 'Upgrade'}
+                        </span>
+                        <span className="min-w-0 break-words">{item}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="text-gray-400">No audit points returned.</li>
+                  )}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="bg-gray-800 rounded-2xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="text-xl font-bold">Gallery</h2>
+              <button
+                onClick={() => void refreshGallery()}
+                className="text-sm text-gray-300 hover:text-white"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {analyzedThumbnailUrl ? (
+              <div className="mb-4 rounded-xl border border-gray-700 bg-gray-900/40 p-3">
+                <p className="text-sm font-semibold mb-2">Analyzed thumbnail</p>
+                <img
+                  src={analyzedThumbnailUrl}
+                  alt="Analyzed thumbnail"
+                  className="w-full aspect-video rounded-lg object-cover border border-gray-700"
+                />
+
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      ev.preventDefault()
+                      void generateSuggestedChanges()
+                    }}
+                    disabled={isGeneratingSuggested}
+                    className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-lg"
+                  >
+                    {isGeneratingSuggested ? 'Generating…' : 'Generate Suggested Changes'}
+                  </button>
+                  {suggestedError ? <p className="text-xs text-red-300">{suggestedError}</p> : null}
+                </div>
+
+                <div className="mt-4">
+                  <ThumbnailComparison
+                    currentThumbnailUrl={analyzedThumbnailUrl}
+                    currentStats={analyzedStats ?? undefined}
+                    currentBadgeText="Low Performance"
+                    optimizedThumbnailUrl={suggestedOptimizedUrl}
+                    optimizedLoading={isGeneratingSuggested}
+                    geminiScore={geminiAudit?.score ?? null}
+                    improvements={geminiAudit?.audit ?? []}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {galleryIterations.length === 0 ? (
+              <p className="text-sm text-gray-400">No versions yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {galleryIterations.map((row) => (
+                  <div key={row.id} className="rounded-xl border border-gray-700 bg-gray-900/40 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{row.yt_video_id}</p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(row.created_at).toLocaleString()} • Score {Math.round(row.performance_score)}/100
+                        </p>
+                      </div>
+                      {typeof row.image_url === 'string' && row.image_url ? (
+                        <img src={row.image_url} alt="Thumbnail" className="h-12 w-12 rounded-lg object-cover" />
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Input Section */}
         <div className="bg-gray-800 rounded-2xl p-8 shadow-2xl mb-8">
